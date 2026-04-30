@@ -92,6 +92,7 @@ pub(crate) fn harness_from_name(name: &str) -> Harness {
         "claude" => Harness::Claude,
         "opencode" => Harness::OpenCode,
         "gemini" => Harness::Gemini,
+        "codex" => Harness::Codex,
         "oz" => Harness::Oz,
         other => {
             log::warn!("Unknown harness config name: {other:?}; treating as Unknown");
@@ -185,10 +186,9 @@ impl AgentSource {
             AgentSource::Slack => "Slack",
             AgentSource::Cli => "CLI",
             AgentSource::ScheduledAgent => "Scheduled",
-            AgentSource::Interactive => "Warp (local agent)",
+            AgentSource::Interactive | AgentSource::CloudMode => "Warp App",
             AgentSource::WebApp => "Oz Web",
             AgentSource::GitHubAction => "GitHub Action",
-            AgentSource::CloudMode => "Warp (cloud agent)",
         }
     }
 
