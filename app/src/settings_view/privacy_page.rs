@@ -328,6 +328,13 @@ impl PrivacyPageView {
     }
 
     fn toggle_cloud_conversation_storage(&mut self, ctx: &mut ViewContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!(
+                "Skipping cloud conversation storage toggle because Warp cloud is unavailable"
+            );
+            return;
+        }
+
         let privacy_settings_handle = PrivacySettings::handle(ctx);
         let old_value = privacy_settings_handle
             .as_ref(ctx)
@@ -1686,6 +1693,10 @@ impl SettingsWidget for CloudConversationStorageWidget {
     }
 
     fn should_render(&self, app: &AppContext) -> bool {
+        if !ChannelState::is_warp_cloud_available() {
+            return false;
+        }
+
         if !FeatureFlag::CloudConversations.is_enabled() {
             return false;
         }

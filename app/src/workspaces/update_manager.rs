@@ -5,6 +5,7 @@ use super::user_workspaces::{
 use super::workspace::WorkspaceUid;
 use crate::ai::llms::LLMPreferences;
 use crate::auth::AuthStateProvider;
+use crate::channel::ChannelState;
 use crate::cloud_object::CloudObjectEventEntrypoint;
 use crate::network::{NetworkStatus, NetworkStatusEvent, NetworkStatusKind};
 use crate::persistence::ModelEvent;
@@ -98,6 +99,10 @@ impl TeamUpdateManager {
         ctx: &mut ModelContext<Self>,
     ) {
         let TeamTesterStatusEvent::InitiateDataPollers { force_refresh } = event;
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         if *force_refresh {
             std::mem::drop(self.refresh_workspace_metadata(ctx));
         }
@@ -131,6 +136,11 @@ impl TeamUpdateManager {
     /// Starts a periodic poll for workspace metadata changes, if there isn't already
     /// an existing poll queued up.
     pub fn start_polling_for_workspace_metadata_updates(&mut self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.stop_polling_for_workspace_metadata_updates();
+            return;
+        }
+
         let is_online = NetworkStatus::as_ref(ctx).is_online();
         if !self.should_poll_for_workspace_metadata_updates && is_online {
             self.should_poll_for_workspace_metadata_updates = true;
@@ -146,6 +156,12 @@ impl TeamUpdateManager {
     /// Out-of-band (from the regular poll) refresh of workspace metadata.
     /// Returns a oneshot Receiver that resolves when the refresh completes (success or final failure).
     pub fn refresh_workspace_metadata(&mut self, ctx: &mut ModelContext<Self>) -> Receiver<()> {
+        if !ChannelState::is_warp_cloud_available() {
+            let (tx, rx) = oneshot::channel::<()>();
+            let _ = tx.send(());
+            return rx;
+        }
+
         // Skip the refresh when logged out to avoid noisy auth errors.
         if !AuthStateProvider::as_ref(ctx).get().is_logged_in() {
             let (tx, rx) = oneshot::channel::<()>();
@@ -197,6 +213,11 @@ impl TeamUpdateManager {
     /// that has on querying experiment state.
     fn poll_for_workspace_metadata_changes(&mut self, ctx: &mut ModelContext<Self>) {
         self.abort_existing_poll();
+
+        if !ChannelState::is_warp_cloud_available() {
+            self.should_poll_for_workspace_metadata_updates = false;
+            return;
+        }
 
         if !self.should_poll_for_workspace_metadata_updates {
             return;

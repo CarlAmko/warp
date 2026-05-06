@@ -12,6 +12,7 @@ use crate::{
         facts::{AIFact, CloudAIFactModel},
     },
     auth::{auth_manager::AuthManager, AuthStateProvider},
+    channel::ChannelState,
     cloud_object::{
         model::{
             actions::{ObjectAction, ObjectActionHistory, ObjectActionType, ObjectActions},
@@ -320,6 +321,10 @@ impl UpdateManager {
         ctx: &mut ModelContext<Self>,
     ) {
         let TeamTesterStatusEvent::InitiateDataPollers { force_refresh } = event;
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         if *force_refresh {
             self.refresh_updated_objects(ctx);
         }
@@ -633,6 +638,12 @@ impl UpdateManager {
     }
 
     pub fn start_polling_for_updated_objects(&mut self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.stop_polling_for_updated_objects();
+            self.has_initial_load.set();
+            return;
+        }
+
         let is_online = NetworkStatus::as_ref(ctx).is_online();
 
         if !self.should_poll_for_updated_objects && is_online {
@@ -643,6 +654,11 @@ impl UpdateManager {
 
     /// Out-of-band (from the regular poll) refresh of updated objects.
     pub fn refresh_updated_objects(&mut self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.has_initial_load.set();
+            return;
+        }
+
         let object_client = self.object_client.clone();
         let cloud_model = CloudModel::as_ref(ctx);
         let versions_for_all_objects = cloud_model.get_versions_for_all_objects(ctx);
@@ -687,6 +703,12 @@ impl UpdateManager {
 
     fn poll_for_updated_objects(&mut self, ctx: &mut ModelContext<Self>) {
         self.abort_existing_poll();
+
+        if !ChannelState::is_warp_cloud_available() {
+            self.should_poll_for_updated_objects = false;
+            self.has_initial_load.set();
+            return;
+        }
 
         if !self.should_poll_for_updated_objects {
             return;
@@ -1234,6 +1256,11 @@ impl UpdateManager {
     /// after signup/login) to prevent stale cloud data from a previous session
     /// being used.
     pub fn reset_initial_load(&self) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.has_initial_load.set();
+            return;
+        }
+
         log::info!("Resetting initial_load_complete condition for fresh cloud object fetch");
         self.has_initial_load.reset();
     }

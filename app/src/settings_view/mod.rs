@@ -277,6 +277,22 @@ impl SettingsSection {
         matches!(self, Self::CloudEnvironments | Self::OzCloudAPIKeys)
     }
 
+    /// Returns true for settings surfaces that require Warp-hosted cloud,
+    /// commercial, or collaboration services. Local-first fork builds keep the
+    /// backing code compiling but remove these sections from primary UX.
+    pub fn requires_warp_cloud(&self) -> bool {
+        matches!(
+            self,
+            Self::BillingAndUsage
+                | Self::CloudEnvironments
+                | Self::OzCloudAPIKeys
+                | Self::Referrals
+                | Self::SharedBlocks
+                | Self::Teams
+                | Self::WarpDrive
+        )
+    }
+
     /// Maps subpage sections back to their parent page section for page lookup.
     /// Non-subpage sections return themselves.
     pub fn parent_page_section(&self) -> Self {
@@ -1016,6 +1032,7 @@ impl SettingsView {
         let pane_configuration = ctx.add_model(|_ctx| PaneConfiguration::new("Settings"));
 
         let global_resource_handles = GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
+        let warp_cloud_available = ChannelState::is_warp_cloud_available();
         // Main settings page with accounts info
         let main_page_handle = ctx.add_typed_action_view(MainSettingsPageView::new);
         ctx.subscribe_to_view(&main_page_handle, |me, _, event, ctx| {
@@ -1037,18 +1054,18 @@ impl SettingsView {
             me.handle_features_page_event(event, ctx);
         });
 
-        // Shared blocks page
-        let block_client = ServerApiProvider::as_ref(ctx).get_block_client();
-        let show_blocks_view_handle =
-            ctx.add_typed_action_view(|ctx| ShowBlocksView::new(block_client, ctx));
-
-        ctx.subscribe_to_view(&show_blocks_view_handle, |_, _, event, ctx| match event {
-            ShowBlocksEvent::ShowToast { message, flavor } => {
-                ctx.emit(SettingsViewEvent::ShowToast {
-                    message: message.clone(),
-                    flavor: *flavor,
-                })
-            }
+        let show_blocks_view_handle = warp_cloud_available.then(|| {
+            let block_client = ServerApiProvider::as_ref(ctx).get_block_client();
+            let handle = ctx.add_typed_action_view(|ctx| ShowBlocksView::new(block_client, ctx));
+            ctx.subscribe_to_view(&handle, |_, _, event, ctx| match event {
+                ShowBlocksEvent::ShowToast { message, flavor } => {
+                    ctx.emit(SettingsViewEvent::ShowToast {
+                        message: message.clone(),
+                        flavor: *flavor,
+                    })
+                }
+            });
+            handle
         });
 
         // About page
@@ -1067,10 +1084,12 @@ impl SettingsView {
             me.handle_environments_page_event(event, ctx);
         });
 
-        // Billing and usage page
-        let billing_and_usage_page_handle = ctx.add_typed_action_view(BillingAndUsagePageView::new);
-        ctx.subscribe_to_view(&billing_and_usage_page_handle, |me, _, event, ctx| {
-            me.handle_billing_and_usage_page_event(event, ctx);
+        let billing_and_usage_page_handle = warp_cloud_available.then(|| {
+            let handle = ctx.add_typed_action_view(BillingAndUsagePageView::new);
+            ctx.subscribe_to_view(&handle, |me, _, event, ctx| {
+                me.handle_billing_and_usage_page_event(event, ctx);
+            });
+            handle
         });
 
         // Keybindings page
@@ -1083,18 +1102,19 @@ impl SettingsView {
             me.handle_code_page_event(event, ctx);
         });
 
-        // Teams page, adding unconditionally, as `should_render` later on decides whether it
-        // should be shown to the user or not
-        let teams_page_handle = ctx.add_typed_action_view(TeamsPageView::new);
-        ctx.subscribe_to_view(&teams_page_handle, |_, _, event, ctx| match event {
-            TeamsPageViewEvent::TeamsChanged => ctx.notify(),
-            TeamsPageViewEvent::OpenWarpDrive => ctx.emit(SettingsViewEvent::OpenWarpDrive),
-            TeamsPageViewEvent::ShowToast { message, flavor } => {
-                ctx.emit(SettingsViewEvent::ShowToast {
-                    message: message.clone(),
-                    flavor: *flavor,
-                })
-            }
+        let teams_page_handle = warp_cloud_available.then(|| {
+            let handle = ctx.add_typed_action_view(TeamsPageView::new);
+            ctx.subscribe_to_view(&handle, |_, _, event, ctx| match event {
+                TeamsPageViewEvent::TeamsChanged => ctx.notify(),
+                TeamsPageViewEvent::OpenWarpDrive => ctx.emit(SettingsViewEvent::OpenWarpDrive),
+                TeamsPageViewEvent::ShowToast { message, flavor } => {
+                    ctx.emit(SettingsViewEvent::ShowToast {
+                        message: message.clone(),
+                        flavor: *flavor,
+                    })
+                }
+            });
+            handle
         });
 
         let warpify_page_handle = ctx.add_typed_action_view(WarpifyPageView::new);
@@ -1108,23 +1128,30 @@ impl SettingsView {
             me.handle_privacy_page_event(event, ctx);
         });
 
-        let referrals_client = ServerApiProvider::as_ref(ctx).get_referrals_client();
-        let referrals_page_handle =
-            ctx.add_typed_action_view(|ctx| ReferralsPageView::new(referrals_client, ctx));
-        ctx.subscribe_to_view(&referrals_page_handle, |me, _, event, ctx| {
-            me.handle_referrals_page_event(event, ctx);
+        let referrals_page_handle = warp_cloud_available.then(|| {
+            let referrals_client = ServerApiProvider::as_ref(ctx).get_referrals_client();
+            let handle =
+                ctx.add_typed_action_view(|ctx| ReferralsPageView::new(referrals_client, ctx));
+            ctx.subscribe_to_view(&handle, |me, _, event, ctx| {
+                me.handle_referrals_page_event(event, ctx);
+            });
+            handle
         });
 
-        // Warp Drive page
-        let warp_drive_page_handle =
-            ctx.add_typed_action_view(warp_drive_page::WarpDriveSettingsPageView::new);
-        ctx.subscribe_to_view(&warp_drive_page_handle, |me, _, event, ctx| {
-            me.handle_warp_drive_page_event(event, ctx);
+        let warp_drive_page_handle = warp_cloud_available.then(|| {
+            let handle = ctx.add_typed_action_view(warp_drive_page::WarpDriveSettingsPageView::new);
+            ctx.subscribe_to_view(&handle, |me, _, event, ctx| {
+                me.handle_warp_drive_page_event(event, ctx);
+            });
+            handle
         });
 
-        let platform_page_handle = ctx.add_typed_action_view(platform_page::PlatformPageView::new);
-        ctx.subscribe_to_view(&platform_page_handle, |me, _, event, ctx| {
-            me.handle_platform_page_event(event, ctx);
+        let platform_page_handle = warp_cloud_available.then(|| {
+            let handle = ctx.add_typed_action_view(platform_page::PlatformPageView::new);
+            ctx.subscribe_to_view(&handle, |me, _, event, ctx| {
+                me.handle_platform_page_event(event, ctx);
+            });
+            handle
         });
 
         // MCP Servers page
@@ -1164,18 +1191,30 @@ impl SettingsView {
         let mut settings_pages = vec![
             SettingsPage::new(main_page_handle),
             SettingsPage::new(ai_page_handle),
-            SettingsPage::new(billing_and_usage_page_handle),
             SettingsPage::new(code_page_handle),
-            SettingsPage::new(teams_page_handle),
             SettingsPage::new(appearance_page_handle),
             SettingsPage::new(features_page_handle),
             SettingsPage::new(keybindings_handle),
-            SettingsPage::new(platform_page_handle),
             SettingsPage::new(warpify_page_handle),
-            SettingsPage::new(referrals_page_handle),
-            SettingsPage::new(show_blocks_view_handle),
-            SettingsPage::new(warp_drive_page_handle),
         ];
+        if let Some(handle) = billing_and_usage_page_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
+        if let Some(handle) = teams_page_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
+        if let Some(handle) = platform_page_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
+        if let Some(handle) = referrals_page_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
+        if let Some(handle) = show_blocks_view_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
+        if let Some(handle) = warp_drive_page_handle {
+            settings_pages.push(SettingsPage::new(handle));
+        }
 
         settings_pages.extend(vec![
             SettingsPage::new(mcp_servers_page_handle),
@@ -1218,6 +1257,17 @@ impl SettingsView {
             SettingsNavItem::Page(SettingsSection::Privacy),
             SettingsNavItem::Page(SettingsSection::About),
         ];
+        if !warp_cloud_available {
+            nav_items.retain_mut(|item| match item {
+                SettingsNavItem::Page(section) => !section.requires_warp_cloud(),
+                SettingsNavItem::Umbrella(umbrella) => {
+                    umbrella
+                        .subpages
+                        .retain(|section| !section.requires_warp_cloud());
+                    !umbrella.subpages.is_empty()
+                }
+            });
+        }
 
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
@@ -1225,6 +1275,11 @@ impl SettingsView {
             Some(SettingsSection::Code) => SettingsSection::CodeIndexing,
             Some(section) if section.is_subpage() => section,
             other => other.unwrap_or_default(),
+        };
+        let initial_page = if !warp_cloud_available && initial_page.requires_warp_cloud() {
+            SettingsSection::Account
+        } else {
+            initial_page
         };
 
         // Auto-expand the umbrella if the initial page is one of its subpages.
@@ -1591,12 +1646,8 @@ impl SettingsView {
         event: &MainSettingsPageEvent,
         ctx: &mut ViewContext<Self>,
     ) {
-        match event {
-            MainSettingsPageEvent::CheckForUpdate => ctx.emit(SettingsViewEvent::CheckForUpdate),
-            MainSettingsPageEvent::SignupAnonymousUser => {
-                ctx.emit(SettingsViewEvent::SignupAnonymousUser)
-            }
-            _ => (),
+        if let MainSettingsPageEvent::CheckForUpdate = event {
+            ctx.emit(SettingsViewEvent::CheckForUpdate);
         }
     }
 
@@ -1857,6 +1908,11 @@ impl SettingsView {
             SettingsSection::Code => SettingsSection::CodeIndexing,
             other => other,
         };
+        let section = if !ChannelState::is_warp_cloud_available() && section.requires_warp_cloud() {
+            SettingsSection::Account
+        } else {
+            section
+        };
 
         // For AI subpages, the backing page is the AI page. Check it exists.
         let page_section = section.parent_page_section();
@@ -1948,6 +2004,10 @@ impl SettingsView {
     }
 
     fn should_render_page(&self, settings_page: &SettingsPage, app: &AppContext) -> bool {
+        if !ChannelState::is_warp_cloud_available() && settings_page.section.requires_warp_cloud() {
+            return false;
+        }
+
         match &settings_page.view_handle {
             SettingsPageViewHandle::Main(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Teams(v) => v.as_ref(app).should_render(app),

@@ -25,6 +25,7 @@ use warpui::{
 use settings::{
     define_settings_group, RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud,
 };
+use warp_core::channel::ChannelState;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
 
@@ -1497,10 +1498,10 @@ impl AISettings {
     }
 
     pub fn is_any_ai_enabled(&self, app: &AppContext) -> bool {
-        // Disable AI for anonymous and logged-out users.
-        let is_anonymous_or_logged_out = AuthStateProvider::as_ref(app)
-            .get()
-            .is_anonymous_or_logged_out();
+        let is_anonymous_or_logged_out = ChannelState::is_warp_cloud_available()
+            && AuthStateProvider::as_ref(app)
+                .get()
+                .is_anonymous_or_logged_out();
 
         *self.is_any_ai_enabled
             && !is_anonymous_or_logged_out

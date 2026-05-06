@@ -52,8 +52,8 @@ pub fn get_cloud_mode_tips() -> Vec<CloudModeTip> {
             Some("https://docs.warp.dev/agent-platform/cloud-agents/secrets"),
         ),
         CloudModeTip::new(
-            "View all your agent runs and their status in the Oz web app.",
-            Some("https://oz.warp.dev"),
+            "View local agent runs and their status from Warp instead of the disabled Oz web app.",
+            None::<String>,
         ),
         CloudModeTip::new(
             "Join any Oz cloud agent run in real-time using Agent Session Sharing.",
@@ -72,8 +72,8 @@ pub fn get_cloud_mode_tips() -> Vec<CloudModeTip> {
             Some("https://docs.warp.dev/agent-platform/cloud-agents/integrations/github-actions"),
         ),
         CloudModeTip::new(
-            "Run agents from GitHub Actions using the `oz-agent-action`.",
-            Some("https://github.com/warpdotdev/oz-agent-action"),
+            "Run local agent workflows from repo-owned scripts instead of the disabled Oz action.",
+            None::<String>,
         ),
         CloudModeTip::new(
             "Call the Oz REST API to trigger agents from any backend service or internal tool.",
@@ -120,8 +120,8 @@ pub fn get_cloud_mode_tips() -> Vec<CloudModeTip> {
             Some("https://docs.warp.dev/agent-platform/cloud-agents/platform"),
         ),
         CloudModeTip::new(
-            "View your teammates' agent runs in the Oz web app for shared visibility.",
-            Some("https://oz.warp.dev"),
+            "Review local agent sessions in Warp; team Oz visibility is disabled in this fork.",
+            None::<String>,
         ),
         CloudModeTip::new(
             "Build agents that automatically triage and label incoming GitHub issues.",

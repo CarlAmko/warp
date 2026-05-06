@@ -26,6 +26,13 @@ pub enum Channel {
 }
 
 impl Channel {
+    pub fn is_first_party(&self) -> bool {
+        match self {
+            Channel::Stable | Channel::Preview | Channel::Dev | Channel::Local => true,
+            Channel::Integration | Channel::Oss => false,
+        }
+    }
+
     /// Whether or not this channel is for internal use only
     pub fn is_dogfood(&self) -> bool {
         match self {

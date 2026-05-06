@@ -3,7 +3,7 @@ use crate::{
     terminal::view::TerminalAction,
     ui_components::{buttons::icon_button, icons::Icon},
     workspaces::{user_workspaces::UserWorkspaces, workspace::UgcCollectionEnablementSetting},
-    Appearance, FeatureFlag, WorkspaceAction,
+    Appearance, ChannelState, FeatureFlag, WorkspaceAction,
 };
 use warpui::{
     elements::{
@@ -196,6 +196,10 @@ impl Entity for TelemetryBanner {
 /// require this check, but an event that logs the input buffer for natural language detection
 /// _does_ need to check this.
 pub fn should_collect_ai_ugc_telemetry(app: &AppContext, is_telemetry_enabled: bool) -> bool {
+    if !ChannelState::is_telemetry_available() {
+        return false;
+    }
+
     match UserWorkspaces::as_ref(app).get_ugc_collection_enablement_setting() {
         UgcCollectionEnablementSetting::Disable => false,
         UgcCollectionEnablementSetting::Enable => true,

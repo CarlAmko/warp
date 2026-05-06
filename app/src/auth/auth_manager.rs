@@ -248,6 +248,11 @@ impl AuthManager {
 
     /// Refreshes the user's auth state using their existing credentials.
     pub fn refresh_user(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping auth refresh because Warp cloud is unavailable");
+            return;
+        }
+
         let Some(credentials) = self.auth_state.credentials() else {
             log::warn!("Attempted to refresh user without credentials");
             return;
@@ -270,6 +275,12 @@ impl AuthManager {
     /// This is only used by the Warp CLI if running on a device that does not have the Warp app installed.
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
     pub fn authorize_device(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping device authorization because Warp cloud is unavailable");
+            ctx.emit(AuthManagerEvent::SkippedLogin);
+            return;
+        }
+
         // Clear any stale user state so old credentials don't interfere
         // with the fresh device auth flow.
         self.auth_state.set_credentials(None);
@@ -575,6 +586,12 @@ impl AuthManager {
         referral_code: Option<String>,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping anonymous user creation because Warp cloud is unavailable");
+            ctx.emit(AuthManagerEvent::SkippedLogin);
+            return;
+        }
+
         let anonymous_user_type = AnonymousUserType::NativeClientAnonymousUserFeatureGated;
 
         let auth_client = self.auth_client.clone();
@@ -661,6 +678,12 @@ impl AuthManager {
         entrypoint: AnonymousUserSignupEntrypoint,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping anonymous user linking because Warp cloud is unavailable");
+            ctx.emit(AuthManagerEvent::SkippedLogin);
+            return;
+        }
+
         let auth_client = self.auth_client.clone();
         let _ = ctx.spawn(
             async move { auth_client.fetch_new_custom_token().await },
@@ -710,6 +733,11 @@ impl AuthManager {
         ctx: &mut ModelContext<Self>,
         construct_url: URLConstructorCallback,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping Warp cloud URL launch because Warp cloud is unavailable");
+            return;
+        }
+
         if !self.auth_state.is_user_anonymous().unwrap_or_default()
             || !self.auth_state.is_logged_in()
         {
@@ -740,6 +768,14 @@ impl AuthManager {
     }
 
     pub fn copy_anonymous_user_linking_url_to_clipboard(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!(
+                "Skipping anonymous user linking URL copy because Warp cloud is unavailable"
+            );
+            ctx.emit(AuthManagerEvent::SkippedLogin);
+            return;
+        }
+
         if !self.auth_state.is_user_anonymous().unwrap_or_default() {
             return;
         }
@@ -773,7 +809,16 @@ impl AuthManager {
         state
     }
 
+    fn local_auth_disabled_url() -> String {
+        "about:blank".to_string()
+    }
+
     pub fn sign_up_url(&mut self) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping sign-up URL generation because Warp cloud is unavailable");
+            return Self::local_auth_disabled_url();
+        }
+
         let state = self.generate_auth_state();
         format!(
             // TODO: we should probably be able to remove the public_beta flag
@@ -785,6 +830,11 @@ impl AuthManager {
     }
 
     pub fn sign_in_url(&mut self) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping sign-in URL generation because Warp cloud is unavailable");
+            return Self::local_auth_disabled_url();
+        }
+
         let state = self.generate_auth_state();
         format!(
             "{}/login/remote?scheme={}&state={}",
@@ -797,6 +847,11 @@ impl AuthManager {
     /// The upgrade confirmation page will kick the user back to the app with a refresh token
     /// if we send a `state` query param to /upgrade
     pub fn upgrade_url(&mut self) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping upgrade URL generation because Warp cloud is unavailable");
+            return Self::local_auth_disabled_url();
+        }
+
         let state = self.generate_auth_state();
         format!(
             "{}/upgrade?scheme={}&state={}",
@@ -807,6 +862,11 @@ impl AuthManager {
     }
 
     pub fn login_options_url(&mut self, custom_token: &str) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping login-options URL generation because Warp cloud is unavailable");
+            return Self::local_auth_disabled_url();
+        }
+
         let state = self.generate_auth_state();
         format!(
             "{}/login_options/{}?state={}",
@@ -817,6 +877,11 @@ impl AuthManager {
     }
 
     pub fn link_sso_url(&mut self, email: &str) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Skipping SSO link URL generation because Warp cloud is unavailable");
+            return Self::local_auth_disabled_url();
+        }
+
         let state = self.generate_auth_state();
         format!(
             "{}/link_sso?email={}&state={}",
@@ -858,6 +923,12 @@ impl AuthManager {
     /// 1. Updates the server by calling set_user_is_onboarded
     /// 2. Updates the local auth state and persists the user data
     pub fn set_user_onboarded(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.auth_state.set_is_onboarded(true);
+            self.persist(ctx);
+            return;
+        }
+
         // Update server
         let auth_client = self.auth_client.clone();
         let _ = ctx.spawn(

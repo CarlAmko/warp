@@ -3,12 +3,12 @@ use parking_lot::Mutex;
 use std::{borrow::Cow, collections::HashSet};
 use url::{Origin, ParseError, Url};
 
-use crate::AppId;
 use crate::{
     channel::config::{
         ChannelConfig, McpOAuthProviderConfig, OzConfig, RudderStackDestination, WarpServerConfig,
     },
     features::FeatureFlag,
+    AppId,
 };
 
 use super::Channel;
@@ -44,8 +44,8 @@ impl ChannelState {
             config: ChannelConfig {
                 app_id,
                 logfile_name: "".into(),
-                server_config: WarpServerConfig::production(),
-                oz_config: OzConfig::production(),
+                server_config: WarpServerConfig::inert_local(),
+                oz_config: OzConfig::inert_local(),
                 telemetry_config: None,
                 autoupdate_config: None,
                 crash_reporting_config: None,
@@ -85,6 +85,12 @@ impl ChannelState {
     pub fn override_server_root_url(url: impl Into<Cow<'static, str>>) -> Result<(), ParseError> {
         let url = url.into();
         Url::parse(&url)?;
+        if !Self::channel().is_first_party() && WarpServerConfig::is_upstream_warp_url(&url) {
+            log::warn!(
+                "Ignoring upstream Warp server root URL override for local-first fork build"
+            );
+            return Ok(());
+        }
         CHANNEL_STATE.lock().config.server_config.server_root_url = url;
         Ok(())
     }
@@ -92,6 +98,10 @@ impl ChannelState {
     pub fn override_ws_server_url(url: impl Into<Cow<'static, str>>) -> Result<(), ParseError> {
         let url = url.into();
         Url::parse(&url)?;
+        if !Self::channel().is_first_party() && WarpServerConfig::is_upstream_warp_url(&url) {
+            log::warn!("Ignoring upstream Warp websocket URL override for local-first fork build");
+            return Ok(());
+        }
         CHANNEL_STATE.lock().config.server_config.rtc_server_url = url;
         Ok(())
     }
@@ -101,6 +111,12 @@ impl ChannelState {
     ) -> Result<(), ParseError> {
         let url = url.into();
         Url::parse(&url)?;
+        if !Self::channel().is_first_party() && WarpServerConfig::is_upstream_warp_url(&url) {
+            log::warn!(
+                "Ignoring upstream Warp session sharing URL override for local-first fork build"
+            );
+            return Ok(());
+        }
         CHANNEL_STATE
             .lock()
             .config
@@ -195,6 +211,18 @@ impl ChannelState {
     /// reporting should be hidden since the toggle has no effect.
     pub fn is_crash_reporting_available() -> bool {
         CHANNEL_STATE.lock().config.crash_reporting_config.is_some()
+    }
+
+    /// Returns whether this build has enough first-party Warp cloud
+    /// configuration to enable auth, teams, billing, cloud objects, and cloud
+    /// preference sync. Local-first fork/default builds intentionally use inert
+    /// server config with no Firebase key, so cloud UX and runtime pollers must
+    /// stay disabled.
+    pub fn is_warp_cloud_available() -> bool {
+        let state = CHANNEL_STATE.lock();
+        state.channel.is_first_party()
+            && !state.config.server_config.server_root_url.is_empty()
+            && !state.config.server_config.firebase_auth_api_key.is_empty()
     }
 
     pub fn releases_base_url() -> Cow<'static, str> {

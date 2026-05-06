@@ -93,6 +93,10 @@ impl TelemetryApi {
     pub async fn flush_events(&self, settings_snapshot: PrivacySettingsSnapshot) -> Result<usize> {
         let events = warpui::telemetry::flush_events();
         let event_count = events.len();
+        if !ChannelState::is_telemetry_available() {
+            log::debug!("Dropping queued telemetry events because telemetry is unavailable.");
+            return Ok(event_count);
+        }
 
         #[cfg(not(target_family = "wasm"))]
         if FeatureFlag::SendTelemetryToFile.is_enabled() {
@@ -120,6 +124,11 @@ impl TelemetryApi {
         path: &Path,
         settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
+        if !ChannelState::is_telemetry_available() {
+            log::debug!("Skipping persisted telemetry flush because telemetry is unavailable.");
+            return Ok(());
+        }
+
         if path.exists() {
             let file = File::open(path)?;
             let events: Vec<RudderBatchMessage> = serde_json::from_reader(file)?;
@@ -161,6 +170,12 @@ impl TelemetryApi {
         settings_snapshot: PrivacySettingsSnapshot,
         path: impl AsRef<Path>,
     ) -> Result<()> {
+        if !ChannelState::is_telemetry_available() {
+            clear_event_queue();
+            log::debug!("Dropping queued telemetry events because telemetry is unavailable.");
+            return Result::Ok(());
+        }
+
         if settings_snapshot.should_disable_telemetry() {
             log::info!("Not writing queued events to disk because telemetry is disabled.");
             return Result::Ok(());
@@ -240,6 +255,11 @@ impl TelemetryApi {
         settings_snapshot: PrivacySettingsSnapshot,
     ) -> impl Future<Output = Result<()>> + '_ {
         let work = async move {
+            if !ChannelState::is_telemetry_available() {
+                log::debug!("Dropping telemetry event because telemetry is unavailable.");
+                return Result::Ok(());
+            }
+
             if settings_snapshot.should_disable_telemetry() {
                 log::info!("Not sending telemetry event because telemetry is disabled.");
                 return Result::Ok(());
@@ -304,6 +324,11 @@ impl TelemetryApi {
         messages: Vec<RudderBatchMessageWithMetadata>,
         settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
+        if !ChannelState::is_telemetry_available() {
+            log::debug!("Dropping RudderStack telemetry batch because telemetry is unavailable.");
+            return Ok(());
+        }
+
         if messages.is_empty() {
             log::debug!("Dropping empty RudderStack telemetry batch");
             return Ok(());
@@ -381,6 +406,16 @@ impl TelemetryApi {
         mut msg: RudderMessage,
         rudder_stack_destination: RudderStackDestination,
     ) -> Result<()> {
+        if !ChannelState::is_telemetry_available()
+            || rudder_stack_destination.root_url.is_empty()
+            || rudder_stack_destination.write_key.is_empty()
+        {
+            log::debug!(
+                "Dropping RudderStack request because telemetry destination is unavailable."
+            );
+            return Ok(());
+        }
+
         msg.attach_context();
 
         let path = match msg {

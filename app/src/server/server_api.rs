@@ -1137,6 +1137,12 @@ impl ServerApi {
         request: &warp_multi_agent_api::Request,
     ) -> std::result::Result<AIOutputStream<warp_multi_agent_api::ResponseEvent>, Arc<AIApiError>>
     {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(Arc::new(AIApiError::Other(anyhow!(
+                "Local AI provider streaming is not wired yet. Configure local provider profiles now; the OpenAI-compatible runtime adapter remains a Phase 4 follow-up."
+            ))));
+        }
+
         let auth_token = self
             .get_or_refresh_access_token()
             .await

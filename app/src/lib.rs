@@ -155,7 +155,9 @@ use code_review::GlobalCodeReviewModel;
 use quit_warning::UnsavedStateSummary;
 use server::network_log_pane_manager::NetworkLogPaneManager;
 use server::network_logging::NetworkLogModel;
-use server::telemetry::context_provider::AppTelemetryContextProvider;
+use server::telemetry::context_provider::{
+    AppTelemetryContextProvider, NoopTelemetryContextProvider,
+};
 use server::voice_transcriber::ServerVoiceTranscriber;
 #[cfg(feature = "local_fs")]
 use settings::import::model::ImportedConfigModel;
@@ -1128,7 +1130,11 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(|_ctx| AuthStateProvider::new(auth_state.clone()));
 
-    ctx.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
+    if ChannelState::is_telemetry_available() {
+        ctx.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
+    } else {
+        ctx.add_singleton_model(NoopTelemetryContextProvider::new_context_provider);
+    }
 
     ctx.add_singleton_model(|ctx| {
         AuthManager::new(
@@ -1795,6 +1801,7 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(LocalWorkflows::new);
 
+    ctx.add_singleton_model(ai::local_provider_profiles::LocalAIProviderProfiles::new);
     ctx.add_singleton_model(LLMPreferences::new);
     ctx.add_singleton_model(HarnessAvailabilityModel::new);
 

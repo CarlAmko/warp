@@ -89,6 +89,11 @@ impl AuthState {
             return state;
         }
 
+        if !ChannelState::is_warp_cloud_available() {
+            log::info!("Warp cloud auth is unavailable; starting with local logged-out auth state");
+            return state;
+        }
+
         if let Some(api_key_value) = api_key {
             log::info!("Authenticating via API key");
             let formatted = if api_key_value.starts_with(API_KEY_PREFIX) {

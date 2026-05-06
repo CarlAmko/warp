@@ -7,6 +7,7 @@ use std::{
 use lazy_static::lazy_static;
 use settings::{Setting as _, SyncToCloud};
 use std::time::Duration;
+use warp_core::channel::ChannelState;
 use warp_core::settings::ChangeEventReason;
 use warp_core::user_preferences::GetUserPreferences;
 use warpui::r#async::Timer;
@@ -79,6 +80,10 @@ pub fn initialize_cloud_preferences_syncer(
     startup_toml_parse_error: Option<&str>,
     ctx: &mut ModelContext<CloudPreferencesSyncer>,
 ) -> CloudPreferencesSyncer {
+    if !ChannelState::is_warp_cloud_available() {
+        return CloudPreferencesSyncer::new(false, toml_file_path, ctx);
+    }
+
     let current_hash = TomlBackedUserPreferences::file_content_hash(&toml_file_path);
     let stored_hash = ctx
         .private_user_preferences()
@@ -202,7 +207,9 @@ impl CloudPreferencesSyncer {
     ) -> Self {
         let mut me = Self::new_internal(ctx, Arc::new(DefaultClientIdProvider), toml_file_path);
         me.force_local_wins_on_startup = force_local_wins_on_startup;
-        me.retry_failed_settings(ctx);
+        if ChannelState::is_warp_cloud_available() {
+            me.retry_failed_settings(ctx);
+        }
         me
     }
 
@@ -344,12 +351,20 @@ impl CloudPreferencesSyncer {
 
     #[cfg(not(test))]
     fn handle_local_preference_updated(&mut self, storage_key: &str, _: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         self.dirty_local_prefs.insert(storage_key.to_string());
         let _ = self.update_tx.try_send(());
     }
 
     #[cfg(test)]
     fn handle_local_preference_updated(&mut self, storage_key: &str, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         // Don't debounce in tests - they have enough async stuff going
         self.maybe_sync_local_prefs_to_cloud(vec![storage_key.to_string()], ctx);
     }
@@ -357,6 +372,10 @@ impl CloudPreferencesSyncer {
     /// This method recursively calls itself after a delay. Call it once and only once to start the
     /// loop. It ensures failed preferences are retried until they are successfully synced.
     fn retry_failed_settings(&mut self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         ctx.spawn(
             async {
                 Timer::after(Self::RETRY_POLL).await;
@@ -406,6 +425,12 @@ impl CloudPreferencesSyncer {
         auth_state: Arc<AuthState>,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.has_completed_initial_load = true;
+            ctx.emit(CloudPreferencesSyncerEvent::InitialLoadCompleted);
+            return;
+        }
+
         let is_onboarded = auth_state.is_onboarded();
 
         // Reset the initial load flag so that we re-evaluate sync direction
@@ -453,6 +478,10 @@ impl CloudPreferencesSyncer {
         force_cloud_to_match_local: ForceCloudToMatchLocal,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         let update_manager = UpdateManager::as_ref(ctx);
 
         // We wait for the cloud objects to load because we need to know if there are any cloud preferences
@@ -469,6 +498,10 @@ impl CloudPreferencesSyncer {
 
     /// Fixes https://linear.app/warpdotdev/issue/CLD-2629/duplicate-prefs-for-users
     fn ensure_no_duplicate_cloud_prefs(&mut self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         log::info!("Ensuring no duplicate cloud prefs");
         let ids_to_delete = CloudModel::handle(ctx).update(ctx, |cloud_model, ctx| {
             let cloud_prefs = cloud_model
@@ -548,6 +581,12 @@ impl CloudPreferencesSyncer {
         force_cloud_to_match_local: ForceCloudToMatchLocal,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            self.has_completed_initial_load = true;
+            ctx.emit(CloudPreferencesSyncerEvent::InitialLoadCompleted);
+            return;
+        }
+
         self.ensure_no_duplicate_cloud_prefs(ctx);
 
         // First-load override: if the startup hash check detected
@@ -646,6 +685,10 @@ impl CloudPreferencesSyncer {
         keys_to_sync: Vec<String>,
         ctx: &mut ModelContext<Self>,
     ) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         if !AppExecutionMode::as_ref(ctx).can_sync_preferences() {
             // Early exit if the app can't sync preferences.
             return;

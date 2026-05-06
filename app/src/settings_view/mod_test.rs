@@ -35,6 +35,38 @@ fn cloud_platform_subpages_are_identified() {
 }
 
 #[test]
+fn cloud_commercial_sections_are_classified() {
+    for section in [
+        SettingsSection::BillingAndUsage,
+        SettingsSection::CloudEnvironments,
+        SettingsSection::OzCloudAPIKeys,
+        SettingsSection::Referrals,
+        SettingsSection::SharedBlocks,
+        SettingsSection::Teams,
+        SettingsSection::WarpDrive,
+    ] {
+        assert!(
+            section.requires_warp_cloud(),
+            "{section:?} should require Warp cloud"
+        );
+    }
+
+    for section in [
+        SettingsSection::Account,
+        SettingsSection::AI,
+        SettingsSection::Code,
+        SettingsSection::MCPServers,
+        SettingsSection::Privacy,
+        SettingsSection::WarpAgent,
+    ] {
+        assert!(
+            !section.requires_warp_cloud(),
+            "{section:?} should remain available locally"
+        );
+    }
+}
+
+#[test]
 fn is_subpage_covers_all_umbrella_types() {
     // All subpages under any umbrella should return true.
     for section in SettingsSection::ai_subpages() {

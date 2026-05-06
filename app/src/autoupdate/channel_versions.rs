@@ -26,6 +26,10 @@ pub async fn fetch_channel_versions(
             .context("Failed to parse channel versions JSON");
     }
 
+    if ChannelState::releases_base_url().is_empty() {
+        anyhow::bail!("channel version fetch disabled because releases base URL is empty");
+    }
+
     let channel_versions = server_api
         .fetch_channel_versions(include_changelogs, is_daily)
         .await
@@ -56,6 +60,10 @@ async fn fetch_channel_versions_from_json_storage(
     client: &http_client::Client,
     nonce: &str,
 ) -> Result<ChannelVersions> {
+    if ChannelState::releases_base_url().is_empty() {
+        anyhow::bail!("GCP channel version fetch disabled because releases base URL is empty");
+    }
+
     log::info!("Fetching channel versions from GCP JSON storage");
     let res = client
         .get(

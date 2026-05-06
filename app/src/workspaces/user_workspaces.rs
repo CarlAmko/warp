@@ -198,6 +198,10 @@ impl UserWorkspaces {
     }
 
     pub fn upgrade_link(user_id: UserUid) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            return "about:blank".to_string();
+        }
+
         format!(
             "{}{}/{}/{}",
             ChannelState::server_root_url(),
@@ -208,6 +212,10 @@ impl UserWorkspaces {
     }
 
     pub fn upgrade_link_for_team(team_uid: ServerId) -> String {
+        if !ChannelState::is_warp_cloud_available() {
+            return "about:blank".to_string();
+        }
+
         format!(
             "{}{}/{}",
             ChannelState::server_root_url(),

@@ -278,12 +278,12 @@ impl TypedActionView for WasmNUXDialog {
                 }
             }
             WasmNUXDialogAction::OpenDownloadDesktopAppLink => {
-                ctx.open_url("https://app.warp.dev/get_warp");
+                log::warn!("Ignoring Warp download link in local-first fork");
                 self.requested_download = true;
                 ctx.notify();
             }
             WasmNUXDialogAction::LearnMore => {
-                ctx.open_url("https://www.warp.dev");
+                log::warn!("Ignoring Warp marketing link in local-first fork");
             }
         }
     }

@@ -61,6 +61,10 @@ pub(crate) fn set_tag<'a, 'b>(key: impl Into<Cow<'a, str>>, value: impl Into<Cow
 
 /// Non-generic internal implementation of [`set_tag`].
 fn set_tag_internal(key: Cow<'_, str>, value: Cow<'_, str>) {
+    if !ChannelState::is_crash_reporting_available() {
+        return;
+    }
+
     // Avoid setting tags with empty values, as Sentry doesn't allow them.
     if value.is_empty() {
         return;
@@ -181,6 +185,11 @@ impl ToSentryTags for CrashRecoveryMetadata {
 /// Initializes the crash reporting subsystem.  Returns whether or not crash
 /// reporting is active.
 pub(crate) fn init(ctx: &mut AppContext) -> bool {
+    if !ChannelState::is_crash_reporting_available() {
+        log::info!("Crash reporting is unavailable for this channel; not initializing sentry.");
+        return false;
+    }
+
     if !FeatureFlag::CrashReporting.is_enabled() {
         log::info!("Crash reporting FeatureFlag is disabled; not initializing sentry.");
         return false;
@@ -294,6 +303,11 @@ fn get_environment() -> Cow<'static, str> {
 /// This must be called from the main thread to capture panics/crashes across the entire
 /// application.
 fn init_sentry(user_id: Option<UserUid>, email: Option<String>, ctx: &mut AppContext) {
+    if !ChannelState::is_crash_reporting_available() {
+        log::info!("Crash reporting is unavailable for this channel; not initializing sentry.");
+        return;
+    }
+
     let key = release_version();
 
     let environment = Some(get_environment());
@@ -397,10 +411,14 @@ fn init_sentry(user_id: Option<UserUid>, email: Option<String>, ctx: &mut AppCon
 
 /// Baseline Sentry client options.
 fn sentry_client_options() -> sentry::ClientOptions {
+    let dsn = ChannelState::sentry_url();
+    debug_assert!(
+        !dsn.is_empty(),
+        "sentry_client_options called without crash reporting config"
+    );
+
     sentry::ClientOptions {
-        dsn: ChannelState::sentry_url()
-            .into_dsn()
-            .expect("Invalid Sentry DSN"),
+        dsn: dsn.into_dsn().expect("Invalid Sentry DSN"),
 
         release: Some(release_version().into()),
         environment: Some(get_environment()),
@@ -520,6 +538,10 @@ fn release_version() -> &'static str {
 
 /// Sets the warp.client_type Sentry tag.
 pub fn set_client_type_tag(client_id: &str) {
+    if !ChannelState::is_crash_reporting_available() {
+        return;
+    }
+
     set_tag("warp.client_type", client_id);
 }
 

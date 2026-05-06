@@ -10,6 +10,9 @@ use crate::ai::execution_profiles::profiles::{
 };
 use crate::ai::execution_profiles::{AIExecutionProfile, ActionPermission, WriteToPtyPermission};
 use crate::ai::llms::{LLMContextWindow, LLMId, LLMPreferences, LLMPreferencesEvent};
+use crate::ai::local_provider_profiles::{
+    LocalAIProviderCompatibility, LocalAIProviderProfiles, LocalAIProviderProfilesEvent,
+};
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::ai::paths::host_native_absolute_path;
 use crate::auth::auth_manager::{AuthManager, LoginGatedFeature};
@@ -832,6 +835,20 @@ impl AISettingsPageView {
             },
         );
 
+        ctx.subscribe_to_model(
+            &LocalAIProviderProfiles::handle(ctx),
+            |me, _, event, ctx| {
+                if matches!(event, LocalAIProviderProfilesEvent::ProfilesChanged) {
+                    LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
+                        prefs.refresh_local_provider_models(ctx);
+                    });
+                    Self::refresh_base_model_menu(&me.base_model_dropdown, ctx);
+                    Self::refresh_coding_model_menu(&me.coding_model_dropdown, ctx);
+                    ctx.notify();
+                }
+            },
+        );
+
         // Refresh model dropdowns when BYO API keys update so key icons reflect latest state.
         ctx.subscribe_to_model(&ApiKeyManager::handle(ctx), |me, _model, _event, ctx| {
             Self::refresh_base_model_menu(&me.base_model_dropdown, ctx);
@@ -1509,8 +1526,12 @@ impl AISettingsPageView {
                     widgets.push(Box::new(VoiceWidget::default()));
                 }
                 widgets.push(Box::new(CLIAgentWidget::default()));
-                widgets.push(Box::new(ApiKeysWidget::new(ctx)));
-                widgets.push(Box::new(AwsBedrockWidget::new(ctx)));
+                if ChannelState::is_warp_cloud_available() {
+                    widgets.push(Box::new(ApiKeysWidget::new(ctx)));
+                    widgets.push(Box::new(AwsBedrockWidget::new(ctx)));
+                } else {
+                    widgets.push(Box::new(LocalProviderProfilesWidget::new(ctx)));
+                }
                 widgets.push(Box::new(AgentAttributionWidget::default()));
                 widgets.push(Box::new(OtherAIWidget::default()));
                 if FeatureFlag::AgentModeComputerUse.is_enabled() {
@@ -1549,8 +1570,12 @@ impl AISettingsPageView {
                 if voice_supported {
                     widgets.push(Box::new(VoiceWidget::default()));
                 }
-                widgets.push(Box::new(ApiKeysWidget::new(ctx)));
-                widgets.push(Box::new(AwsBedrockWidget::new(ctx)));
+                if ChannelState::is_warp_cloud_available() {
+                    widgets.push(Box::new(ApiKeysWidget::new(ctx)));
+                    widgets.push(Box::new(AwsBedrockWidget::new(ctx)));
+                } else {
+                    widgets.push(Box::new(LocalProviderProfilesWidget::new(ctx)));
+                }
                 widgets.push(Box::new(AgentAttributionWidget::default()));
                 widgets.push(Box::new(OtherAIWidget::default()));
                 if FeatureFlag::AgentModeComputerUse.is_enabled() {
@@ -2238,6 +2263,8 @@ pub enum AISettingsPageAction {
     /// Called when the user commits a new context window value (slider drop or
     /// input box commit).
     SetContextWindowSize(u32),
+    SetLocalProviderCompatibility(LocalAIProviderCompatibility),
+    ClearLocalProviderProfile,
     SetAutonomyReadonlyCommandsSetting,
     SetAutonomySupervisedSetting,
     SetCodingPermission(AgentModeCodingPermissionsType),
@@ -2747,6 +2774,25 @@ impl TypedActionView for AISettingsPageView {
                     profiles_model.set_context_window_limit(profile_id, Some(clamped), ctx);
                 });
                 self.sync_context_window_editor(ctx, true);
+                ctx.notify();
+            }
+            AISettingsPageAction::SetLocalProviderCompatibility(compatibility) => {
+                LocalAIProviderProfiles::handle(ctx).update(ctx, |profiles, ctx| {
+                    let profile = profiles.default_profile().clone();
+                    profiles.set_default_profile(
+                        profile.display_name,
+                        profile.base_url,
+                        profile.model_id,
+                        compatibility.clone(),
+                        ctx,
+                    );
+                });
+                ctx.notify();
+            }
+            AISettingsPageAction::ClearLocalProviderProfile => {
+                LocalAIProviderProfiles::handle(ctx).update(ctx, |profiles, ctx| {
+                    profiles.clear_default_profile(ctx);
+                });
                 ctx.notify();
             }
             AISettingsPageAction::SetAutonomyReadonlyCommandsSetting
@@ -3596,74 +3642,84 @@ impl SettingsWidget for UsageWidget {
             appearance,
         );
 
-        let auth_state = AuthStateProvider::as_ref(app).get();
-        let upgrade_cta_text_fragments = if let Some(team) =
-            UserWorkspaces::as_ref(app).current_team()
-        {
-            let current_user_email = auth_state.user_email().unwrap_or_default();
-            let has_admin_permissions = team.has_admin_permissions(&current_user_email);
-            if team.billing_metadata.can_upgrade_to_higher_tier_plan() {
-                let upgrade_url = UserWorkspaces::upgrade_link_for_team(team.uid);
-                if has_admin_permissions {
+        let upgrade_cta = if ChannelState::is_warp_cloud_available() {
+            let auth_state = AuthStateProvider::as_ref(app).get();
+            let upgrade_cta_text_fragments =
+                if let Some(team) = UserWorkspaces::as_ref(app).current_team() {
+                    let current_user_email = auth_state.user_email().unwrap_or_default();
+                    let has_admin_permissions = team.has_admin_permissions(&current_user_email);
+                    if team.billing_metadata.can_upgrade_to_higher_tier_plan() {
+                        let upgrade_url = UserWorkspaces::upgrade_link_for_team(team.uid);
+                        if has_admin_permissions {
+                            vec![
+                                FormattedTextFragment::hyperlink("Upgrade", upgrade_url),
+                                FormattedTextFragment::plain_text(" to get more AI usage."),
+                            ]
+                        } else {
+                            // The /upgrade page says to contact their administrator.
+                            vec![
+                                FormattedTextFragment::hyperlink("Compare plans", upgrade_url),
+                                FormattedTextFragment::plain_text(" for more AI usage."),
+                            ]
+                        }
+                    } else {
+                        vec![
+                            FormattedTextFragment::hyperlink(
+                                "Contact support",
+                                "mailto:support@warp.dev",
+                            ),
+                            FormattedTextFragment::plain_text(" for more AI usage."),
+                        ]
+                    }
+                } else {
+                    let user_id = auth_state.user_id().unwrap_or_default();
+                    let upgrade_url = UserWorkspaces::upgrade_link(user_id);
                     vec![
                         FormattedTextFragment::hyperlink("Upgrade", upgrade_url),
                         FormattedTextFragment::plain_text(" to get more AI usage."),
                     ]
-                } else {
-                    // The /upgrade page says to contact their administrator.
-                    vec![
-                        FormattedTextFragment::hyperlink("Compare plans", upgrade_url),
-                        FormattedTextFragment::plain_text(" for more AI usage."),
-                    ]
-                }
+                };
+
+            let mut upgrade_cta = FormattedTextElement::new(
+                FormattedText::new([FormattedTextLine::Line(upgrade_cta_text_fragments)]),
+                appearance.ui_font_size(),
+                appearance.ui_font_family(),
+                appearance.ui_font_family(),
+                blended_colors::text_sub(appearance.theme(), appearance.theme().surface_1()),
+                self.requests_highlight_index.clone(),
+            )
+            .with_hyperlink_font_color(appearance.theme().accent().into_solid());
+
+            if AuthStateProvider::as_ref(app)
+                .get()
+                .is_anonymous_or_logged_out()
+            {
+                upgrade_cta = upgrade_cta.register_default_click_handlers(|_, ctx, _| {
+                    ctx.dispatch_typed_action(AISettingsPageAction::AttemptLoginGatedUpgrade);
+                });
             } else {
-                vec![
-                    FormattedTextFragment::hyperlink("Contact support", "mailto:support@warp.dev"),
-                    FormattedTextFragment::plain_text(" for more AI usage."),
-                ]
+                upgrade_cta = upgrade_cta.register_default_click_handlers(|url, ctx, _| {
+                    ctx.dispatch_typed_action(AISettingsPageAction::HyperlinkClick(url));
+                })
             }
-        } else {
-            let user_id = auth_state.user_id().unwrap_or_default();
-            let upgrade_url = UserWorkspaces::upgrade_link(user_id);
-            vec![
-                FormattedTextFragment::hyperlink("Upgrade", upgrade_url),
-                FormattedTextFragment::plain_text(" to get more AI usage."),
-            ]
-        };
 
-        let mut upgrade_cta = FormattedTextElement::new(
-            FormattedText::new([FormattedTextLine::Line(upgrade_cta_text_fragments)]),
-            appearance.ui_font_size(),
-            appearance.ui_font_family(),
-            appearance.ui_font_family(),
-            blended_colors::text_sub(appearance.theme(), appearance.theme().surface_1()),
-            self.requests_highlight_index.clone(),
-        )
-        .with_hyperlink_font_color(appearance.theme().accent().into_solid());
-
-        if AuthStateProvider::as_ref(app)
-            .get()
-            .is_anonymous_or_logged_out()
-        {
-            upgrade_cta = upgrade_cta.register_default_click_handlers(|_, ctx, _| {
-                ctx.dispatch_typed_action(AISettingsPageAction::AttemptLoginGatedUpgrade);
-            });
-        } else {
-            upgrade_cta = upgrade_cta.register_default_click_handlers(|url, ctx, _| {
-                ctx.dispatch_typed_action(AISettingsPageAction::HyperlinkClick(url));
-            })
-        }
-
-        Flex::column()
-            .with_children([
-                render_separator(appearance),
-                usage_header,
-                request_usage_row,
+            Some(
                 Container::new(upgrade_cta.finish())
                     .with_margin_bottom(16.)
                     .finish(),
-            ])
-            .finish()
+            )
+        } else {
+            None
+        };
+
+        let mut column = Flex::column()
+            .with_child(render_separator(appearance))
+            .with_child(usage_header)
+            .with_child(request_usage_row);
+        if let Some(upgrade_cta) = upgrade_cta {
+            column.add_child(upgrade_cta);
+        }
+        column.finish()
     }
 }
 
@@ -6315,6 +6371,297 @@ struct ApiKeysWidget {
     upgrade_highlight_index: HighlightedHyperlink,
 }
 
+struct LocalProviderProfilesWidget {
+    display_name_editor: ViewHandle<EditorView>,
+    base_url_editor: ViewHandle<EditorView>,
+    model_id_editor: ViewHandle<EditorView>,
+    api_key_editor: ViewHandle<EditorView>,
+    compatibility_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
+    clear_profile_button: ViewHandle<ActionButton>,
+}
+
+impl LocalProviderProfilesWidget {
+    fn new(ctx: &mut ViewContext<<Self as SettingsWidget>::View>) -> Self {
+        let profile = LocalAIProviderProfiles::as_ref(ctx)
+            .default_profile()
+            .clone();
+        let api_key = LocalAIProviderProfiles::as_ref(ctx).default_api_key_for_display(ctx);
+        let is_any_ai_enabled = AISettings::as_ref(ctx).is_any_ai_enabled(ctx);
+
+        fn create_editor(
+            initial_value: String,
+            placeholder: &'static str,
+            is_password: bool,
+            ctx: &mut ViewContext<AISettingsPageView>,
+        ) -> ViewHandle<EditorView> {
+            ctx.add_typed_action_view(move |ctx| {
+                let appearance = Appearance::as_ref(ctx);
+                let options = SingleLineEditorOptions {
+                    is_password,
+                    text: TextOptions {
+                        font_size_override: Some(appearance.ui_font_size()),
+                        font_family_override: Some(appearance.monospace_font_family()),
+                        text_colors_override: Some(TextColors {
+                            default_color: appearance.theme().active_ui_text_color(),
+                            disabled_color: appearance.theme().disabled_ui_text_color(),
+                            hint_color: appearance.theme().disabled_ui_text_color(),
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut editor = EditorView::single_line(options, ctx);
+                editor.set_placeholder_text(placeholder, ctx);
+                editor.set_buffer_text(&initial_value, ctx);
+                editor
+            })
+        }
+
+        let display_name_editor =
+            create_editor(profile.display_name, "Local OpenAI-compatible", false, ctx);
+        let base_url_editor =
+            create_editor(profile.base_url, "http://localhost:11434/v1", false, ctx);
+        let model_id_editor = create_editor(profile.model_id, "gpt-5.1", false, ctx);
+        let api_key_editor = create_editor(api_key.unwrap_or_default(), "sk-...", true, ctx);
+
+        for editor in [
+            display_name_editor.clone(),
+            base_url_editor.clone(),
+            model_id_editor.clone(),
+            api_key_editor.clone(),
+        ] {
+            AISettingsPageView::update_editor_interaction_state(editor, is_any_ai_enabled, ctx);
+        }
+
+        let display_name_editor_clone = display_name_editor.clone();
+        let base_url_editor_clone = base_url_editor.clone();
+        let model_id_editor_clone = model_id_editor.clone();
+        for editor in [
+            display_name_editor.clone(),
+            base_url_editor.clone(),
+            model_id_editor.clone(),
+        ] {
+            let display_name_editor = display_name_editor_clone.clone();
+            let base_url_editor = base_url_editor_clone.clone();
+            let model_id_editor = model_id_editor_clone.clone();
+            ctx.subscribe_to_view(&editor, move |_, _, event, ctx| {
+                if matches!(event, EditorEvent::Blurred | EditorEvent::Enter) {
+                    let display_name = display_name_editor.as_ref(ctx).buffer_text(ctx);
+                    let base_url = base_url_editor.as_ref(ctx).buffer_text(ctx);
+                    let model_id = model_id_editor.as_ref(ctx).buffer_text(ctx);
+                    LocalAIProviderProfiles::handle(ctx).update(ctx, |profiles, ctx| {
+                        let compatibility = profiles.default_profile().compatibility.clone();
+                        profiles.set_default_profile(
+                            display_name,
+                            base_url,
+                            model_id,
+                            compatibility,
+                            ctx,
+                        );
+                    });
+                }
+            });
+        }
+
+        ctx.subscribe_to_view(&api_key_editor, |_, editor, event, ctx| {
+            if matches!(event, EditorEvent::Blurred | EditorEvent::Enter) {
+                let value = editor.as_ref(ctx).buffer_text(ctx);
+                let api_key = (!value.trim().is_empty()).then_some(value);
+                LocalAIProviderProfiles::handle(ctx).update(ctx, |profiles, ctx| {
+                    profiles.set_default_api_key(api_key, ctx);
+                });
+            }
+        });
+
+        let compatibility_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            dropdown.set_top_bar_max_width(AI_SETTINGS_DROPDOWN_WIDTH);
+            dropdown.set_menu_width(AI_SETTINGS_DROPDOWN_WIDTH, ctx);
+            dropdown.add_items(
+                [
+                    LocalAIProviderCompatibility::OpenAIChatCompletions,
+                    LocalAIProviderCompatibility::OpenAIResponses,
+                ]
+                .into_iter()
+                .map(|compatibility| {
+                    DropdownItem::new(
+                        compatibility.display_name(),
+                        AISettingsPageAction::SetLocalProviderCompatibility(compatibility),
+                    )
+                })
+                .collect(),
+                ctx,
+            );
+            dropdown.set_selected_by_action(
+                AISettingsPageAction::SetLocalProviderCompatibility(
+                    LocalAIProviderProfiles::as_ref(ctx)
+                        .default_profile()
+                        .compatibility
+                        .clone(),
+                ),
+                ctx,
+            );
+            dropdown
+        });
+
+        let clear_profile_button = ctx.add_typed_action_view(|_| {
+            ActionButton::new("Clear", SecondaryTheme)
+                .with_icon(Icon::Trash)
+                .with_size(ButtonSize::Small)
+                .on_click(|ctx| {
+                    ctx.dispatch_typed_action(AISettingsPageAction::ClearLocalProviderProfile);
+                })
+        });
+
+        Self {
+            display_name_editor,
+            base_url_editor,
+            model_id_editor,
+            api_key_editor,
+            compatibility_dropdown,
+            clear_profile_button,
+        }
+    }
+
+    fn render_text_input(
+        &self,
+        appearance: &Appearance,
+        label: &'static str,
+        editor: ViewHandle<EditorView>,
+        is_enabled: bool,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let padding = Some(Coords {
+            top: 10.,
+            bottom: 10.,
+            left: 16.,
+            right: 16.,
+        });
+        let editor_style = UiComponentStyles {
+            padding,
+            background: Some(appearance.theme().surface_2().into()),
+            ..Default::default()
+        };
+
+        Flex::column()
+            .with_spacing(8.)
+            .with_child(
+                Text::new_inline(label, appearance.ui_font_family(), CONTENT_FONT_SIZE)
+                    .with_color(styles::header_font_color(is_enabled, app).into())
+                    .finish(),
+            )
+            .with_child(
+                appearance
+                    .ui_builder()
+                    .text_input(editor)
+                    .with_style(editor_style)
+                    .build()
+                    .finish(),
+            )
+            .finish()
+    }
+}
+
+impl SettingsWidget for LocalProviderProfilesWidget {
+    type View = AISettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "local ai provider profiles openai compatible base url api key model"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let is_any_ai_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);
+        let profile = LocalAIProviderProfiles::as_ref(app).default_profile();
+        let has_key = LocalAIProviderProfiles::as_ref(app).has_api_key(profile, app);
+        let status = if profile.is_configured() && has_key {
+            "Local provider ready."
+        } else {
+            "Add a base URL, model ID, and API key to enable local AI models."
+        };
+
+        let mut column = Flex::column()
+            .with_child(render_separator(appearance))
+            .with_child(
+                build_sub_header(
+                    appearance,
+                    "Local AI Provider",
+                    Some(styles::header_font_color(is_any_ai_enabled, app)),
+                )
+                .with_padding_bottom(HEADER_PADDING)
+                .finish(),
+            )
+            .with_child(
+                Container::new(render_ai_setting_description(
+                    status,
+                    is_any_ai_enabled,
+                    app,
+                ))
+                .with_margin_bottom(8.)
+                .finish(),
+            )
+            .with_child(self.render_text_input(
+                appearance,
+                "Profile name",
+                self.display_name_editor.clone(),
+                is_any_ai_enabled,
+                app,
+            ))
+            .with_child(self.render_text_input(
+                appearance,
+                "Base URL",
+                self.base_url_editor.clone(),
+                is_any_ai_enabled,
+                app,
+            ))
+            .with_child(self.render_text_input(
+                appearance,
+                "Model ID",
+                self.model_id_editor.clone(),
+                is_any_ai_enabled,
+                app,
+            ))
+            .with_child(self.render_text_input(
+                appearance,
+                "API key",
+                self.api_key_editor.clone(),
+                is_any_ai_enabled,
+                app,
+            ));
+
+        column.add_child(
+            Flex::row()
+                .with_spacing(12.)
+                .with_cross_axis_alignment(CrossAxisAlignment::End)
+                .with_child(
+                    Flex::column()
+                        .with_spacing(8.)
+                        .with_child(
+                            Text::new_inline(
+                                "Compatibility",
+                                appearance.ui_font_family(),
+                                CONTENT_FONT_SIZE,
+                            )
+                            .with_color(styles::header_font_color(is_any_ai_enabled, app).into())
+                            .finish(),
+                        )
+                        .with_child(ChildView::new(&self.compatibility_dropdown).finish())
+                        .finish(),
+                )
+                .with_child(ChildView::new(&self.clear_profile_button).finish())
+                .finish(),
+        );
+
+        Container::new(column.finish())
+            .with_margin_bottom(HEADER_PADDING)
+            .finish()
+    }
+}
+
 impl ApiKeysWidget {
     fn new(ctx: &mut ViewContext<<Self as SettingsWidget>::View>) -> Self {
         let ai_settings = AISettings::as_ref(ctx);
@@ -6509,7 +6856,7 @@ impl ApiKeysWidget {
         ));
 
         // Show upgrade CTA if BYOK is not enabled
-        if !is_byo_enabled {
+        if !is_byo_enabled && ChannelState::is_warp_cloud_available() {
             let auth_state = AuthStateProvider::as_ref(app).get();
             let upgrade_text_fragments = if let Some(team) =
                 UserWorkspaces::as_ref(app).current_team()

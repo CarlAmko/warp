@@ -236,11 +236,12 @@ impl RequestParams {
 
         let user_workspaces = UserWorkspaces::as_ref(app);
         let api_keys = ApiKeyManager::as_ref(app).api_keys_for_request(
-            user_workspaces.is_byo_api_key_enabled(),
-            user_workspaces.is_aws_bedrock_credentials_enabled(app),
+            !ChannelState::is_warp_cloud_available() || user_workspaces.is_byo_api_key_enabled(),
+            ChannelState::is_warp_cloud_available()
+                && user_workspaces.is_aws_bedrock_credentials_enabled(app),
         );
-        let allow_use_of_warp_credits_with_byok =
-            *AISettings::as_ref(app).can_use_warp_credits_with_byok;
+        let allow_use_of_warp_credits_with_byok = ChannelState::is_warp_cloud_available()
+            && *AISettings::as_ref(app).can_use_warp_credits_with_byok;
 
         let app_execution_mode = AppExecutionMode::as_ref(app);
         let autonomy_level = if app_execution_mode.is_autonomous() {

@@ -38,6 +38,7 @@ use warp_graphql::{
 use warp_managed_secrets::client::{SecretOwner, TaskIdentityToken};
 
 use super::ServerApi;
+use crate::channel::ChannelState;
 use crate::server::graphql::{get_request_context, get_user_facing_error_message};
 
 pub use warp_managed_secrets::client::{ManagedSecretConfigs, ManagedSecretsClient};
@@ -46,6 +47,10 @@ pub use warp_managed_secrets::client::{ManagedSecretConfigs, ManagedSecretsClien
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl ManagedSecretsClient for ServerApi {
     async fn get_managed_secret_configs(&self) -> Result<ManagedSecretConfigs> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(anyhow!("Warp cloud managed secrets are disabled"));
+        }
+
         let variables = GetManagedSecretConfigVariables {
             request_context: get_request_context(),
         };
@@ -89,6 +94,10 @@ impl ManagedSecretsClient for ServerApi {
         encrypted_value: String,
         description: Option<String>,
     ) -> Result<ManagedSecret> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(anyhow!("Warp cloud managed secrets are disabled"));
+        }
+
         let graphql_owner = match owner {
             SecretOwner::CurrentUser => Owner {
                 type_: OwnerType::User,
@@ -127,6 +136,10 @@ impl ManagedSecretsClient for ServerApi {
     }
 
     async fn delete_managed_secret(&self, owner: SecretOwner, name: String) -> Result<()> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(anyhow!("Warp cloud managed secrets are disabled"));
+        }
+
         let graphql_owner = match owner {
             SecretOwner::CurrentUser => Owner {
                 type_: OwnerType::User,
@@ -166,6 +179,10 @@ impl ManagedSecretsClient for ServerApi {
         encrypted_value: Option<String>,
         description: Option<String>,
     ) -> Result<ManagedSecret> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(anyhow!("Warp cloud managed secrets are disabled"));
+        }
+
         let graphql_owner = match owner {
             SecretOwner::CurrentUser => Owner {
                 type_: OwnerType::User,
@@ -203,6 +220,10 @@ impl ManagedSecretsClient for ServerApi {
     }
 
     async fn list_secrets(&self) -> Result<Vec<ManagedSecret>> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Ok(Vec::new());
+        }
+
         let variables = ListManagedSecretsVariables {
             // Pagination over managed secrets is not yet supported.
             input: ManagedSecretsInput { cursor: None },
@@ -227,6 +248,10 @@ impl ManagedSecretsClient for ServerApi {
         task_id: String,
         workload_token: String,
     ) -> Result<HashMap<String, ManagedSecretValue>> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Ok(HashMap::new());
+        }
+
         let variables = TaskSecretsVariables {
             input: TaskSecretsInput {
                 task_id: cynic::Id::new(task_id),
@@ -256,6 +281,10 @@ impl ManagedSecretsClient for ServerApi {
         &self,
         options: warp_managed_secrets::client::IdentityTokenOptions,
     ) -> Result<TaskIdentityToken> {
+        if !ChannelState::is_warp_cloud_available() {
+            return Err(anyhow!("Warp cloud managed secrets are disabled"));
+        }
+
         let requested_duration_seconds = options
             .requested_duration
             .as_secs()

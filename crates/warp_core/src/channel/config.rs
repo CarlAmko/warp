@@ -41,6 +41,26 @@ pub struct WarpServerConfig {
 }
 
 impl WarpServerConfig {
+    const UPSTREAM_WARP_HOSTS: &[&str] = &[
+        "warp.dev",
+        "www.warp.dev",
+        "app.warp.dev",
+        "rtc.app.warp.dev",
+        "sessions.app.warp.dev",
+        "oz.warp.dev",
+        "releases.warp.dev",
+    ];
+
+    pub fn inert_local() -> Self {
+        Self {
+            // IANA TEST-NET-1 with TCP discard port: valid URL shape, no Warp upstream.
+            server_root_url: "http://192.0.2.0:9".into(),
+            rtc_server_url: "ws://192.0.2.0:9/graphql/v2".into(),
+            session_sharing_server_url: None,
+            firebase_auth_api_key: "".into(),
+        }
+    }
+
     pub fn production() -> Self {
         Self {
             server_root_url: "https://app.warp.dev".into(),
@@ -48,6 +68,21 @@ impl WarpServerConfig {
             session_sharing_server_url: Some("wss://sessions.app.warp.dev".into()),
             firebase_auth_api_key: "AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs".into(),
         }
+    }
+
+    pub fn is_upstream_warp_url(url: &str) -> bool {
+        let Ok(parsed) = url::Url::parse(url) else {
+            return url.contains("warpdotdev");
+        };
+
+        let Some(host) = parsed.host_str() else {
+            return false;
+        };
+
+        host.contains("warpdotdev")
+            || Self::UPSTREAM_WARP_HOSTS.iter().any(|upstream_host| {
+                host == *upstream_host || host.ends_with(&format!(".{upstream_host}"))
+            })
     }
 }
 
@@ -63,6 +98,14 @@ pub struct OzConfig {
 }
 
 impl OzConfig {
+    pub fn inert_local() -> Self {
+        Self {
+            // IANA TEST-NET-1 with TCP discard port: valid URL shape, no Warp upstream.
+            oz_root_url: "http://192.0.2.0:9".into(),
+            workload_audience_url: None,
+        }
+    }
+
     pub fn production() -> Self {
         Self {
             oz_root_url: "https://oz.warp.dev".into(),

@@ -1119,6 +1119,11 @@ pub fn is_incoming_version_past_current(version: Option<&str>) -> bool {
 /// of this app bundle.
 fn release_assets_directory_url(channel: Channel, version: &str) -> String {
     let releases_base_url = ChannelState::releases_base_url();
+    if releases_base_url.is_empty() {
+        log::warn!("Autoupdate release asset URL requested without releases base URL");
+        return String::new();
+    }
+
     match channel {
         Channel::Stable => {
             format!("{releases_base_url}/stable/{version}")

@@ -32,7 +32,6 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 const DOCS_URL: &str = "https://docs.warp.dev/agent-platform/cloud-agents/overview";
 const ENV_DOCS_URL: &str =
     "https://docs.warp.dev/reference/cli/integration-setup#creating-an-environment";
-const OZ_URL: &str = "https://oz.warp.dev";
 
 const CONTENT_MAX_WIDTH: f32 = 720.;
 
@@ -116,7 +115,7 @@ impl CloudSetupGuideView {
         );
 
         let visit_oz_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new("Visit Oz", SecondaryTheme)
+            ActionButton::new("Unavailable locally", SecondaryTheme)
                 .on_click(|ctx| ctx.dispatch_typed_action(CloudSetupGuideAction::VisitOz))
         });
 
@@ -207,13 +206,13 @@ impl CloudSetupGuideView {
         header_container.finish()
     }
 
-    /// Render the quick start banner with link to oz.warp.dev.
+    /// Render the quick start banner.
     fn render_quick_start_banner(&self, appearance: &Appearance) -> Box<dyn Element> {
         let theme = appearance.theme();
         let font_size = 16.;
 
         let text = Text::new_inline(
-            "Quick start: Visit oz.warp.dev for a UI-based setup experience.",
+            "Cloud Oz setup is disabled in this local-first fork.",
             appearance.ui_font_family(),
             font_size,
         )
@@ -653,7 +652,7 @@ impl TypedActionView for CloudSetupGuideView {
                 ));
             }
             CloudSetupGuideAction::VisitOz => {
-                ctx.open_url(OZ_URL);
+                log::info!("Ignoring Oz cloud setup link in local-first fork");
                 send_telemetry_from_ctx!(
                     AgentManagementTelemetryEvent::SetupGuideStepRun {
                         step: SetupGuideStep::VisitOz

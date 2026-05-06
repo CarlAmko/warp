@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, OnceLock},
 };
+use warp_core::channel::ChannelState;
 use warp_core::ui::icons::Icon;
 use warp_core::user_preferences::GetUserPreferences;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
@@ -22,6 +23,7 @@ use crate::{
 use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent};
 
 use super::execution_profiles::profiles::AIExecutionProfilesModel;
+use super::local_provider_profiles::LocalAIProviderProfiles;
 
 pub use ai::LLMId;
 
@@ -556,7 +558,11 @@ pub struct LLMPreferences {
 
 impl LLMPreferences {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        let models_by_feature = get_cached_models(ctx).unwrap_or_default();
+        let models_by_feature = if ChannelState::is_warp_cloud_available() {
+            get_cached_models(ctx).unwrap_or_default()
+        } else {
+            LocalAIProviderProfiles::load_from_model_context(ctx).models_by_feature(ctx)
+        };
 
         ctx.subscribe_to_model(&NetworkStatus::handle(ctx), |me, event, ctx| {
             if let NetworkStatusEvent::NetworkStatusChanged {
@@ -906,6 +912,10 @@ impl LLMPreferences {
 
     /// Fetches the latest set of models from the server for the currently logged in user, and updates the model.
     pub fn refresh_authed_models(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         // Don't try to fetch auth'd models if the user is not logged in yet.
         if !AuthStateProvider::as_ref(ctx).get().is_logged_in() {
             return;
@@ -929,6 +939,10 @@ impl LLMPreferences {
 
     /// No auth required (i.e. to populate the pre-login onboarding picker).
     fn refresh_public_models(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         let ai_api_client = ServerApiProvider::as_ref(ctx).get_ai_client();
         ctx.spawn(
             async move { ai_api_client.get_free_available_models(None).await },
@@ -946,11 +960,26 @@ impl LLMPreferences {
     }
 
     pub fn refresh_available_models(&self, ctx: &mut ModelContext<Self>) {
+        if !ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
         if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
             self.refresh_authed_models(ctx);
         } else {
             self.refresh_public_models(ctx);
         }
+    }
+
+    pub fn refresh_local_provider_models(&mut self, ctx: &mut ModelContext<Self>) {
+        if ChannelState::is_warp_cloud_available() {
+            return;
+        }
+
+        let update = LocalAIProviderProfiles::handle(ctx)
+            .as_ref(ctx)
+            .models_by_feature(ctx);
+        self.on_server_update(update, ctx);
     }
 
     pub fn update_feature_model_choices(
